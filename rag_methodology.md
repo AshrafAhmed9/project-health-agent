@@ -45,3 +45,5 @@ To prevent critical issues from being masked by high scores in other areas, the 
     - If $DQ < 30\%$: Overall status becomes **INSUFFICIENT DATA** (uncomputable).
 4. **Tasks Exclusions**: Tasks marked "Not Applicable" or containing status "Not Applicable" are excluded from all calculations.
 5. **In Progress Imputation**: Active tasks in progress with missing percent complete are imputed as $50\%$ complete.
+6. **Budget Burn**: Budget and financial metrics (e.g. planned vs. actual cost) were not present in the provided Excel datasets. Therefore, budget burn is excluded from the quantitative RAG calculation. The system is designed to integrate cost-variance metrics (e.g., Cost Performance Index) as a 7th signal once financial tracking is added to the sheets.
+7. **Stakeholder Sentiment**: Stakeholder and team sentiment is captured qualitatively from the text comments in the 'Comments' sheet (present in the S2P Titan file) and forwarded to the LLM agent's context window. It is not scored quantitatively due to the lack of a structured sentiment rating scale in the input files.
