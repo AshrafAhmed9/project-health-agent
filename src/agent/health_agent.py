@@ -310,10 +310,16 @@ A key risk factor is that **{sum(1 for t in project_data.tasks if t.status in (T
 """
         return report
 
-    def generate_presentation_content(self, all_reports_text: str) -> Dict[str, Any]:
+    def generate_presentation_content(
+        self, all_reports_text: str, portfolio: list = None
+    ) -> Dict[str, Any]:
         """
-        Uses LLM to summarize and format slides, or falls back to template presentation objects.
+        Uses LLM to summarize and format slides, or falls back to a deterministic
+        generator that derives slide content from the computed portfolio metrics.
+        `portfolio` is a list of dicts: {"project_data", "latest" RAGResult,
+        "history" [RAGResult oldest->newest], "weeks" [str]}.
         """
+        slide_content = None
         if self.client:
             try:
                 response = self.client.chat.completions.create(
@@ -333,99 +339,358 @@ A key risk factor is that **{sum(1 for t in project_data.tasks if t.status in (T
                     response_format={"type": "json_object"},
                     temperature=0.2,
                 )
-                return json.loads(response.choices[0].message.content)
+                slide_content = json.loads(response.choices[0].message.content)
             except Exception as e:
                 print(
                     f"⚠️ OpenAI Presentation content gen failed: {e}. Using fallback presentation content."
                 )
 
-        # Local fallback slides
-        return self._get_fallback_presentation_content()
+        if slide_content is None:
+            slide_content = self._build_data_driven_slides(portfolio)
 
-    def _get_fallback_presentation_content(self) -> Dict[str, Any]:
+        # Always attach deterministic visual extras (stat cards + risk matrix)
+        # computed from the actual data so slide visuals never drift from reality.
+        if portfolio:
+            slide_content["project_cards"] = self._build_project_cards(portfolio)
+            slide_content["risk_matrix"] = self._build_risk_matrix(portfolio)
+        return slide_content
+
+    # ------------------------------------------------------------------
+    # Deterministic (offline) presentation content, derived from real data
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _trim(text: str, limit: int) -> str:
+        """Truncate at a word boundary with an ellipsis instead of mid-word."""
+        text = (text or "").strip()
+        if len(text) <= limit:
+            return text
+        cut = text[:limit].rsplit(" ", 1)[0].rstrip(",;:")
+        return cut + "…"
+
+    @staticmethod
+    def _project_stats(entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute the key display metrics for one portfolio project."""
+        proj_data = entry["project_data"]
+        latest = entry["latest"]
+        summary = proj_data.summary
+
+        active = [
+            t
+            for t in proj_data.tasks
+            if t.status
+            in (TaskStatus.IN_PROGRESS, TaskStatus.NOT_STARTED, TaskStatus.ON_HOLD)
+        ]
+        unassigned = sum(1 for t in active if not t.assigned_to)
+        unassigned_pct = unassigned / max(len(active), 1)
+
+        # Use the SPI computed by the schedule analyzer so every surface
+        # (report, card, slide) quotes the same number.
+        import re
+
+        spi = None
+        for s in latest.signals:
+            if "schedule" in s.signal_name.lower():
+                match = re.search(r"SPI\s*=\s*(\d+(?:\.\d+)?)", s.detail or "")
+                if match:
+                    spi = float(match.group(1))
+                break
+        if spi is None:
+            elapsed = (summary.reference_date - summary.project_start).days
+            elapsed_ratio = elapsed / max(summary.duration_days, 1)
+            spi = (
+                summary.percent_complete / elapsed_ratio if elapsed_ratio > 0 else None
+            )
+
+        history = entry.get("history") or [latest]
+        first_score = history[0].composite_score
+        delta = latest.composite_score - first_score
+
+        signal_map = {s.signal_name: s for s in latest.signals}
+        weak_signals = sorted(
+            (s for s in latest.signals if s.score <= 60), key=lambda s: s.score
+        )
+        slipped_milestones = sorted(
+            (
+                m
+                for m in proj_data.milestones
+                if m.status != TaskStatus.COMPLETED
+                and m.variance_days is not None
+                and m.variance_days < 0
+            ),
+            key=lambda m: m.variance_days,
+        )
+
+        return {
+            "name": summary.project_name,
+            "pm": summary.project_manager,
+            "rag": latest.overall_rag.value,
+            "score": latest.composite_score,
+            "first_score": first_score,
+            "delta": delta,
+            "pct_complete": summary.percent_complete,
+            "spi": spi,
+            "active": len(active),
+            "unassigned": unassigned,
+            "unassigned_pct": unassigned_pct,
+            "on_hold": summary.on_hold_count,
+            "confidence": latest.data_confidence,
+            "signals": signal_map,
+            "weak_signals": weak_signals,
+            "slipped_milestones": slipped_milestones,
+        }
+
+    def _build_project_cards(self, portfolio: list) -> list:
+        cards = []
+        for entry in portfolio:
+            st = self._project_stats(entry)
+            emoji = {"GREEN": "🟢", "AMBER": "🟡", "RED": "🔴"}.get(st["rag"], "⚪")
+            spi_str = f"{st['spi']:.2f}" if st["spi"] is not None else "N/A"
+            cards.append(
+                {
+                    "title": st["name"],
+                    "lines": [
+                        f"Overall Status: {emoji} {st['rag']} ({st['score']:.0f}/100)",
+                        f"Completion: {st['pct_complete']*100:.0f}%",
+                        f"Schedule Index (SPI): {spi_str}",
+                        f"Unassigned active tasks: {st['unassigned']} ({st['unassigned_pct']*100:.0f}%)",
+                        f"Data confidence: {st['confidence']*100:.0f}%",
+                    ],
+                }
+            )
+        return cards
+
+    def _build_risk_matrix(self, portfolio: list) -> Dict[str, list]:
+        matrix = {"high_high": [], "high_med": [], "med_med": []}
+        for entry in portfolio:
+            st = self._project_stats(entry)
+            short = st["name"].split("-")[-1].strip()
+            for s in st["weak_signals"]:
+                item = f"{short}: {s.signal_name} ({s.score:.0f}/100)"
+                if s.score < 40:
+                    matrix["high_high"].append(item)
+                elif s.score < 55:
+                    matrix["high_med"].append(item)
+                else:
+                    matrix["med_med"].append(item)
+            for m in st["slipped_milestones"][:2]:
+                item = f"{short}: {self._trim(m.task_name, 30)} ({m.variance_days}d)"
+                if m.variance_days <= -30:
+                    matrix["high_high"].append(item)
+                elif m.variance_days <= -10:
+                    matrix["high_med"].append(item)
+        # Cap each quadrant so the visual stays readable
+        return {k: v[:3] for k, v in matrix.items()}
+
+    def _build_data_driven_slides(self, portfolio: list) -> Dict[str, Any]:
+        """Build the 7-slide executive deck content from computed metrics."""
+        if not portfolio:
+            raise ValueError(
+                "No portfolio data supplied for offline presentation generation."
+            )
+
+        stats = [self._project_stats(e) for e in portfolio]
+        weeks = portfolio[0].get("weeks") or []
+        period = f"{weeks[0]} to {weeks[-1]}" if weeks else "the reporting period"
+
+        def direction(delta):
+            if delta > 3:
+                return "IMPROVING"
+            if delta < -3:
+                return "DECLINING"
+            return "STABLE"
+
+        # --- Slide 1: Portfolio overview -------------------------------
+        s1_bullets = []
+        for st in stats:
+            s1_bullets.append(
+                f"{st['name']} is {st['rag']} with a composite health score of "
+                f"{st['score']:.0f}/100 ({st['pct_complete']*100:.0f}% complete)."
+            )
+        worst_resource = max(stats, key=lambda s: s["unassigned_pct"])
+        s1_bullets.append(
+            "Resource coverage is the portfolio's weakest signal: "
+            + ", ".join(
+                f"{st['unassigned_pct']*100:.0f}% of {st['name'].split('-')[-1].strip()} active tasks are unassigned"
+                for st in stats
+            )
+            + "."
+        )
+        s1_bullets.append(
+            f"Combined, {sum(st['unassigned'] for st in stats)} active tasks across the portfolio have no owner, "
+            f"led by {worst_resource['name']}."
+        )
+        s1_bullets.append(
+            "Both projects carry schedule slippage on in-flight phases that is compressing downstream UAT and Hypercare windows."
+        )
+
+        # --- Slide 2: Trends --------------------------------------------
+        s2_bullets = []
+        for st in stats:
+            s2_bullets.append(
+                f"{st['name']}: composite score moved from {st['first_score']:.0f} to {st['score']:.0f} "
+                f"({st['delta']:+.1f} pts) over {period} — trajectory {direction(st['delta'])}."
+            )
+        avg_delta = sum(st["delta"] for st in stats) / len(stats)
+        s2_bullets.append(
+            f"Portfolio-average health changed {avg_delta:+.1f} points over the period; "
+            f"overall trajectory is {direction(avg_delta)}."
+        )
+        s2_bullets.append(
+            "Score erosion is driven primarily by schedule performance and growing critical-path delays, not by task velocity."
+        )
+
+        # --- Slide 3: Risk matrix ---------------------------------------
+        s3_bullets = []
+        rank = 1
+        for st in stats:
+            for s in st["weak_signals"][:2]:
+                s3_bullets.append(
+                    f"Risk {rank}: {st['name'].split('-')[-1].strip()} — {s.signal_name} scored {s.score:.0f}/100. {self._trim(s.detail, 95)}"
+                )
+                rank += 1
+            if st["slipped_milestones"]:
+                m = st["slipped_milestones"][0]
+                s3_bullets.append(
+                    f"Risk {rank}: {st['name'].split('-')[-1].strip()} — milestone '{m.task_name}' is {abs(m.variance_days)} days behind baseline."
+                )
+                rank += 1
+        s3_bullets = s3_bullets[:5]
+
+        # --- Slide 4: Schedule deep-dive --------------------------------
+        s4_bullets = []
+        for st in stats:
+            sched = next(
+                (s for s in st["signals"].values() if "schedule" in s.signal_name.lower()),
+                None,
+            )
+            if sched:
+                s4_bullets.append(
+                    f"{st['name'].split('-')[-1].strip()}: schedule signal {sched.score:.0f}/100 — {self._trim(sched.detail, 115)}"
+                )
+            for m in st["slipped_milestones"][:2]:
+                s4_bullets.append(
+                    f"{st['name'].split('-')[-1].strip()}: '{m.task_name}' running {abs(m.variance_days)} days behind baseline ({m.status.value})."
+                )
+        s4_bullets = s4_bullets[:6]
+
+        # --- Slide 5: Resources & dependencies --------------------------
+        s5_bullets = []
+        for st in stats:
+            s5_bullets.append(
+                f"{st['name'].split('-')[-1].strip()}: {st['unassigned']} of {st['active']} active tasks "
+                f"({st['unassigned_pct']*100:.0f}%) have no assigned owner; {st['on_hold']} tasks are On Hold."
+            )
+            dep = next(
+                (s for s in st["signals"].values() if "dependency" in s.signal_name.lower()),
+                None,
+            )
+            if dep:
+                s5_bullets.append(
+                    f"{st['name'].split('-')[-1].strip()}: dependency risk {dep.score:.0f}/100 — {self._trim(dep.detail, 105)}"
+                )
+        s5_bullets = s5_bullets[:6]
+
+        # --- Slide 6: Recommendations ------------------------------------
+        rec_map = [
+            ("resource", "Assign dedicated owners to all unassigned critical-path tasks within one week (Owner: Project Managers)."),
+            ("schedule", "Re-baseline milestones with material negative variance and publish a recovery plan (Owner: Delivery Leads)."),
+            ("blocker", "Escalate all 'On Hold' blockers to the executive sponsor for resolution this cycle (Owner: Sponsor)."),
+            ("dependency", "Protect the critical path: expedite delayed predecessor tasks and add float buffers (Owner: PMO)."),
+            ("milestone", "Introduce mid-phase checkpoint reviews for milestones trending late (Owner: PMO)."),
+        ]
+        weak_names = {
+            s.signal_name.lower() for st in stats for s in st["weak_signals"]
+        }
+        s6_bullets = [
+            rec for key, rec in rec_map if any(key in n for n in weak_names)
+        ]
+        s6_bullets.append(
+            "Governance: establish a weekly cross-project health review using this automated report."
+        )
+        s6_bullets = s6_bullets[:5]
+
+        # --- Slide 7: Outlook --------------------------------------------
+        s7_bullets = []
+        for st in stats:
+            n_weeks = max(len(portfolio[0].get("weeks") or [1, 2]) - 1, 1)
+            weekly_delta = st["delta"] / n_weeks
+            projected = st["score"] + weekly_delta * 4
+            s7_bullets.append(
+                f"{st['name'].split('-')[-1].strip()}: at the current trend ({weekly_delta:+.1f} pts/week), "
+                f"the composite score is projected at ~{projected:.0f}/100 in 30 days"
+                + (
+                    " — crossing into RED territory without intervention."
+                    if projected < 40 <= st["score"]
+                    else "."
+                )
+            )
+        s7_bullets.append(
+            "With intervention (owner assignment + blocker escalation), resource and blocker signals can recover within two reporting cycles."
+        )
+        s7_bullets.append(
+            "Decision required: lock resource assignments and approve re-baselined milestones at the next steering committee."
+        )
+
+        def notes(text):
+            return text
+
         return {
             "slide1": {
                 "title": "Portfolio Health Overview",
-                "subtitle": "Critical schedule and resource risks impacting S2P implementation timelines",
-                "bullets": [
-                    "S2P Project (Titan) is currently RED with composite score of 33/100.",
-                    "Project Plan B (UniSan) is currently RED with composite score of 32/100.",
-                    "Both projects suffer from severe resource allocation shortages.",
-                    "Active tasks unassigned: S2P (67.5%), Project Plan B (35.4%).",
-                    "Cascading schedule delays are impacting downstream Hypercare phases.",
-                ],
-                "speaker_notes": "Good morning team. This slide presents the health of our active S2P implementation portfolio. Both projects are currently in Red status, driven by significant delays in configuration workshops and massive gaps in resource assignments.",
+                "subtitle": f"Automated RAG assessment across {len(stats)} active implementations ({period})",
+                "bullets": s1_bullets[:5],
+                "speaker_notes": notes(
+                    "This slide summarizes the automated health assessment of the portfolio. "
+                    + " ".join(s1_bullets[:2])
+                ),
             },
             "slide2": {
                 "title": "Portfolio Trajectory Trends",
-                "subtitle": "Steep decline in health metrics over the past 3 weeks",
-                "bullets": [
-                    "S2P Project composite health fell from 52 (Amber) to 33 (Red) in 14 days.",
-                    "Project Plan B health dropped from 48 (Amber) to 32 (Red) in the same period.",
-                    "Timeline compression is accelerating in build and configuration phases.",
-                    "Schedule performance index (SPI) for both projects is below 0.80.",
-                    "Trajectory is DECLINING, and urgent executive intervention is required.",
-                ],
-                "speaker_notes": "Looking at the 3-week rolling trends, we see a rapid decline in both projects. This is not a sudden drop but an acceleration of build delays that have gone unmitigated.",
+                "subtitle": "Composite health score movement across the reporting period",
+                "bullets": s2_bullets[:5],
+                "speaker_notes": notes(
+                    "Trend view across the reporting weeks. " + s2_bullets[-1]
+                ),
             },
             "slide3": {
                 "title": "Critical Risk Matrix",
-                "subtitle": "Core schedule, resource, and blocker issues mapped by impact",
-                "bullets": [
-                    "Risk 1: S2P Phase 2 P2P schedule delay of 81 days (High Impact / High Likelihood).",
-                    "Risk 2: S2P Hypercare 6% complete with 30-day slip (High Impact / High Likelihood).",
-                    "Risk 3: S2P Resource Gap (67% active tasks unassigned) (High Impact / High Likelihood).",
-                    "Risk 4: Plan B Training Phase I delay of 17 days (Medium Impact / High Likelihood).",
-                    "Risk 5: Plan B Configuration Documentation delay of 13 days (Medium Impact / Medium Likelihood).",
-                ],
-                "speaker_notes": "We have prioritized our risks. The top three are schedule slippages on S2P Phase 2, Hypercare stalls on S2P, and the extensive resource gaps across the board.",
+                "subtitle": "Top risks ranked by signal severity and milestone slippage",
+                "bullets": s3_bullets,
+                "speaker_notes": notes(
+                    "Risks are ranked from the weakest computed signals and the largest milestone variances."
+                ),
             },
             "slide4": {
                 "title": "Schedule Performance Deep-Dive",
-                "subtitle": "Detailed look at milestone slippages across key phases",
-                "bullets": [
-                    "S2P build phase is running 32 days behind schedule (98% done but stalled).",
-                    "S2P Phase 2 P2P is currently 21% complete with -81 days variance.",
-                    "Plan B Training Phase I is delayed 17 days, causing cascading impacts.",
-                    "Plan B Hypercare Phase I has a 13-day delay (25% complete).",
-                    "Late configuration document approvals are compressing testing cycles.",
-                ],
-                "speaker_notes": "This slide breaks down the specific schedule offenders. S2P Phase 2 is currently 81 days late against baseline, and Plan B's Training is pushing out critical launch dates.",
+                "subtitle": "Milestone slippage and schedule signal detail by project",
+                "bullets": s4_bullets,
+                "speaker_notes": notes(
+                    "Detailed schedule breakdown, generated from baseline-versus-actual variance in the project plans."
+                ),
             },
             "slide5": {
                 "title": "Resource Gaps & Dependency Analysis",
-                "subtitle": "Unassigned active tasks and critical path blocker review",
-                "bullets": [
-                    "S2P Project: 333 tasks (67%) have no assigned owner.",
-                    "Project Plan B: 136 tasks (35%) have no assigned owner.",
-                    "S2P has 3 active blockers 'On Hold' related to D&B integrations.",
-                    "Critical path tasks delayed due to unassigned integration work.",
-                    "Downstream testing depends on immediate completion of integration mappings.",
-                ],
-                "speaker_notes": "Resource assignment is our biggest bottleneck. With 67% of tasks unassigned in the S2P project, progress has halted. We also have three active blockers on JDE and D&B integrations.",
+                "subtitle": "Ownership coverage and critical-path exposure",
+                "bullets": s5_bullets,
+                "speaker_notes": notes(
+                    "Resource coverage is the portfolio's most consistent weakness; the donut chart shows assigned versus unassigned active tasks."
+                ),
             },
             "slide6": {
                 "title": "Strategic Recommendations",
-                "subtitle": "Actionable steps to stabilize portfolio health and recover timelines",
-                "bullets": [
-                    "Immediate Action: Assign dedicated owners to critical path tasks (Owner: PMs).",
-                    "Blocker Escalation: Set up priority call to resolve D&B credentials (Owner: Zycus Sponsor).",
-                    "Timeline Re-baselining: Adjust S2P Phase 2 milestone expectations (Owner: Aftab H.).",
-                    "UAT Mitigation: Pull forward Plan B Phase II configuration validations (Owner: Rajat B.).",
-                    "Governance: Establish weekly cross-project syncs to monitor resource gaps.",
-                ],
-                "speaker_notes": "To recover, we must immediately assign resources to critical path tasks, escalate the D&B integration credential blocker today, and adjust our baselines for the remaining S2P phases.",
+                "subtitle": "Actions mapped to the weakest health signals",
+                "bullets": s6_bullets,
+                "speaker_notes": notes(
+                    "Each recommendation maps directly to a failing or weak signal in the RAG framework."
+                ),
             },
             "slide7": {
                 "title": "30-Day Outlook & Forecast",
-                "subtitle": "Scenario analysis with and without proposed interventions",
-                "bullets": [
-                    "Without Intervention: S2P Phase 2 Go-Live will slip from Dec 2026 to Mar 2027.",
-                    "Without Intervention: Plan B Phase II milestones will suffer a 3-week cascade delay.",
-                    "With Intervention: Blocker resolution will recover 10 days of integration timeline.",
-                    "With Intervention: Resource allocation will stabilize S2P build progress.",
-                    "Milestone Decision: Lock resource assignments by July 15.",
-                ],
-                "speaker_notes": "In the next 30 days, we face a critical decision. If we don't allocate resources now, our December Go-Live for Titan will slip into early next year. Intervening now recovers crucial schedule variance.",
+                "subtitle": "Trend-based projection with and without intervention",
+                "bullets": s7_bullets[:5],
+                "speaker_notes": notes(
+                    "Projection extrapolates the observed weekly score trend forward four weeks."
+                ),
             },
         }

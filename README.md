@@ -9,10 +9,7 @@ An automated pipeline designed for the Zycus AI Engineer Intern Technical Assign
 A launcher script is provided to handle virtual environment creation, package installation, and execution of the complete pipeline.
 
 ```bash
-# Navigate to the project directory
-cd project-health-agent
-
-# Make launcher executable and run
+# From the repository root
 chmod +x run.sh && ./run.sh
 ```
 
@@ -37,17 +34,35 @@ python -m src.main presentation
 python -m src.main full-run
 ```
 
+### Bonus: Weekly Schedule
+
+The agent can run unattended on a weekly cadence (every Monday at 9:00 AM) via APScheduler:
+
+```bash
+python -m src.main schedule-task
+```
+
+The scheduler re-analyzes every project plan in `data/` and writes a fresh dated report folder under `outputs/weekly_reports/`. In production this same entry point can be triggered by cron or a CI workflow instead.
+
+### Optional: LLM-Generated Narratives
+
+By default the system runs fully offline using a deterministic template engine. To enable LLM-written narratives and slide content, copy `.env.example` to `.env` and set `OPENAI_API_KEY` (the RAG status itself is always computed deterministically — the LLM only writes the prose):
+
+```bash
+cp .env.example .env   # then add your API key
+```
+
 ---
 
 ## Deliverables Mapping
 
 | Deliverable | File Path / Location | Description |
 | :--- | :--- | :--- |
-| **One-page RAG methodology** | [`rag_methodology.md`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/rag_methodology.md) | Defines the mathematical signals, overrides, and assumptions of the status engine. |
-| **Project Code** | [`src/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/src) | Complete Python package containing ingestion, scoring, charting, and presentation modules. |
-| **Simulated Weekly Outputs** | [`outputs/weekly_reports/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/outputs/weekly_reports) | Reports across 3 historical weeks (`2026-06-18`, `2026-06-25`, `2026-07-02`) showing trajectories. |
-| **Monthly Presentation** | [`outputs/monthly_presentation/executive_deck_july_2026.pptx`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/outputs/monthly_presentation/executive_deck_july_2026.pptx) | A 7-slide, 16:9 widescreen PowerPoint deck with embedded charts ready for stakeholders. |
-| **Unit & Integration Tests** | [`tests/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/tests) | Pytest files covering parser integrity, normalized data mapping, and RAG override rules. |
+| **One-page RAG methodology** | [`rag_methodology.md`](rag_methodology.md) | Defines the mathematical signals, overrides, and assumptions of the status engine. |
+| **Project Code** | [`src/`](src/) | Complete Python package containing ingestion, scoring, charting, and presentation modules. |
+| **Simulated Weekly Outputs** | [`outputs/weekly_reports/`](outputs/weekly_reports/) | Reports across 3 historical weeks (`2026-06-18`, `2026-06-25`, `2026-07-02`) showing trajectories. |
+| **Monthly Presentation** | [`outputs/monthly_presentation/executive_deck_july_2026.pptx`](outputs/monthly_presentation/executive_deck_july_2026.pptx) | A 7-slide, 16:9 widescreen PowerPoint deck with embedded charts ready for stakeholders. |
+| **Unit & Integration Tests** | [`tests/`](tests/) | Pytest files covering parser integrity, normalized data mapping, and RAG override rules. |
 
 ---
 

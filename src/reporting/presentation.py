@@ -113,51 +113,30 @@ class PPTXGenerator:
         )
         self._add_bullet_list(slide1, data1.get("bullets", []), 0.5, 1.4, 7.0, 5.0)
 
-        # Add Card for Project S2P (Titan)
-        card1 = slide1.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(8.0),
-            Inches(1.5),
-            Inches(4.8),
-            Inches(2.3),
-        )
-        card1.fill.solid()
-        card1.fill.fore_color.rgb = LIGHT_BG
-        card1.line.color.rgb = PRIMARY_MEDIUM
-        tf1 = card1.text_frame
-        tf1.word_wrap = True
-        p_c1 = tf1.paragraphs[0]
-        p_c1.text = "Project A: S2P Titan Implementation"
-        p_c1.font.bold = True
-        p_c1.font.size = Pt(16)
-        p_c1.font.color.rgb = PRIMARY_DARK
-        p_c1_2 = tf1.add_paragraph()
-        p_c1_2.text = "Overall Status: 🔴 RED\nCompletion: 71%\nSchedule Index (SPI): 0.77\nUnassigned tasks: 67.5%"
-        p_c1_2.font.size = Pt(12)
-        p_c1_2.font.color.rgb = DARK_TEXT
-
-        # Add Card for Project Plan B (UniSan)
-        card2 = slide1.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(8.0),
-            Inches(4.2),
-            Inches(4.8),
-            Inches(2.3),
-        )
-        card2.fill.solid()
-        card2.fill.fore_color.rgb = LIGHT_BG
-        card2.line.color.rgb = PRIMARY_MEDIUM
-        tf2 = card2.text_frame
-        tf2.word_wrap = True
-        p_c2 = tf2.paragraphs[0]
-        p_c2.text = "Project B: S2P UniSan Implementation"
-        p_c2.font.bold = True
-        p_c2.font.size = Pt(16)
-        p_c2.font.color.rgb = PRIMARY_DARK
-        p_c2_2 = tf2.add_paragraph()
-        p_c2_2.text = "Overall Status: 🔴 RED\nCompletion: 44%\nSchedule Index (SPI): 0.79\nUnassigned tasks: 35.4%"
-        p_c2_2.font.size = Pt(12)
-        p_c2_2.font.color.rgb = DARK_TEXT
+        # Add per-project stat cards, computed from the actual analysis results
+        card_tops = [1.5, 4.2]
+        for idx, card_data in enumerate(slide_data.get("project_cards", [])[:2]):
+            card = slide1.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(8.0),
+                Inches(card_tops[idx]),
+                Inches(4.8),
+                Inches(2.5),
+            )
+            card.fill.solid()
+            card.fill.fore_color.rgb = LIGHT_BG
+            card.line.color.rgb = PRIMARY_MEDIUM
+            tf = card.text_frame
+            tf.word_wrap = True
+            p_title = tf.paragraphs[0]
+            p_title.text = card_data.get("title", "")
+            p_title.font.bold = True
+            p_title.font.size = Pt(15)
+            p_title.font.color.rgb = PRIMARY_DARK
+            p_body = tf.add_paragraph()
+            p_body.text = "\n".join(card_data.get("lines", []))
+            p_body.font.size = Pt(12)
+            p_body.font.color.rgb = DARK_TEXT
 
         self._add_speaker_notes(slide1, data1.get("speaker_notes", ""))
 
@@ -197,24 +176,37 @@ class PPTXGenerator:
         )
         self._add_bullet_list(slide3, data3.get("bullets", []), 0.5, 1.4, 7.5, 5.0)
 
-        # Generate simple visual Risk Matrix card representation on slide
-        matrix_bg = slide3.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(8.5), Inches(1.5), Inches(4.3), Inches(4.5)
-        )
-        matrix_bg.fill.solid()
-        matrix_bg.fill.fore_color.rgb = LIGHT_BG
-        matrix_bg.line.color.rgb = PRIMARY_DARK
-        tf3_m = matrix_bg.text_frame
-        tf3_m.word_wrap = True
-        p_m = tf3_m.paragraphs[0]
-        p_m.text = "CRITICAL RISK HEATMAP"
-        p_m.font.bold = True
-        p_m.font.size = Pt(14)
-        p_m.font.color.rgb = PRIMARY_DARK
-        p_m_2 = tf3_m.add_paragraph()
-        p_m_2.text = "\n🔥 [HIGH IMPACT / HIGH LIKELIHOOD]\n- Phase 2 P2P Schedule Slip (-81d)\n- S2P Hypercare Stall (6% complete)\n- Titan Resource Deficit (67.5% missing)\n\n⚡ [HIGH IMPACT / MED LIKELIHOOD]\n- Plan B Training Phase I Slip (+17d)\n\n⚠️ [MED IMPACT / MED LIKELIHOOD]\n- Plan B Config Documentation delay"
-        p_m_2.font.size = Pt(11)
-        p_m_2.font.color.rgb = DARK_TEXT
+        # Generate visual Risk Matrix card from the computed risk buckets
+        risk_matrix = slide_data.get("risk_matrix") or {}
+        if risk_matrix:
+            matrix_bg = slide3.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, Inches(8.5), Inches(1.5), Inches(4.3), Inches(4.9)
+            )
+            matrix_bg.fill.solid()
+            matrix_bg.fill.fore_color.rgb = LIGHT_BG
+            matrix_bg.line.color.rgb = PRIMARY_DARK
+            tf3_m = matrix_bg.text_frame
+            tf3_m.word_wrap = True
+            p_m = tf3_m.paragraphs[0]
+            p_m.text = "CRITICAL RISK HEATMAP"
+            p_m.font.bold = True
+            p_m.font.size = Pt(14)
+            p_m.font.color.rgb = PRIMARY_DARK
+
+            sections = [
+                ("🔥 [HIGH IMPACT / HIGH LIKELIHOOD]", risk_matrix.get("high_high", [])),
+                ("⚡ [HIGH IMPACT / MED LIKELIHOOD]", risk_matrix.get("high_med", [])),
+                ("⚠️ [MED IMPACT / MED LIKELIHOOD]", risk_matrix.get("med_med", [])),
+            ]
+            matrix_lines = []
+            for header, items in sections:
+                if items:
+                    matrix_lines.append("\n" + header)
+                    matrix_lines.extend(f"- {item}" for item in items)
+            p_m_2 = tf3_m.add_paragraph()
+            p_m_2.text = "\n".join(matrix_lines)
+            p_m_2.font.size = Pt(10)
+            p_m_2.font.color.rgb = DARK_TEXT
 
         self._add_speaker_notes(slide3, data3.get("speaker_notes", ""))
 

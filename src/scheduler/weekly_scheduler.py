@@ -5,10 +5,31 @@ from datetime import date
 
 
 def weekly_job(data_dir: Path, output_dir: Path):
-    """Job that runs weekly."""
+    """Analyze every project plan and save this week's health reports."""
+    from src.agent.health_agent import ProjectHealthAgent
+    from src.reporting.weekly_report import save_weekly_report
 
-    # Initialize agent and trigger run
-    print(f"⏰ Starting scheduled weekly health check run for {date.today()}...")
+    ref_date = date.today()
+    print(f"⏰ Starting scheduled weekly health check run for {ref_date}...")
+
+    agent = ProjectHealthAgent()
+    files = [f for f in data_dir.glob("*.xlsx") if not f.name.startswith("~$")]
+    if not files:
+        print(f"⚠️ No Excel project plans found in {data_dir}. Nothing to report.")
+        return
+
+    for f in files:
+        try:
+            proj_data, rag_res = agent.analyze_project(f, ref_date)
+            report = agent.generate_weekly_report(proj_data, rag_res, trend=None)
+            project_key = "s2p_project" if "s2p" in f.name.lower() else "project_plan_b"
+            save_weekly_report(report, output_dir, str(ref_date), project_key)
+            print(
+                f"✓ Weekly report generated for {proj_data.summary.project_name} "
+                f"({rag_res.overall_rag.value}, {rag_res.composite_score:.1f}/100)"
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to process {f.name}: {e}")
 
 
 def start_scheduler(data_dir: Path = Path("data"), output_dir: Path = Path("outputs")):

@@ -257,7 +257,19 @@ def full_run(
     console.print(
         "\n[bold]🖥️ Constructing executive PPTX presentation slides...[/bold]"
     )
-    slide_content = agent.generate_presentation_content(reports_text_accumulator)
+    portfolio = [
+        {
+            "project_data": project_data_map[key],
+            "latest": hist[0],
+            "history": list(reversed(hist)),  # oldest -> newest
+            "weeks": simulated_weeks,
+        }
+        for key, hist in historical_results.items()
+        if hist and key in project_data_map
+    ]
+    slide_content = agent.generate_presentation_content(
+        reports_text_accumulator, portfolio
+    )
 
     pptx_path = output_dir / "monthly_presentation" / "executive_deck_july_2026.pptx"
     generator = PPTXGenerator()
