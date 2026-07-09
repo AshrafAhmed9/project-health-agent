@@ -1,8 +1,8 @@
-import pytest
 from datetime import date
 from src.config import RAGStatus, TaskStatus
 from src.ingestion.normalizer import ProjectData, ProjectSummary, NormalizedTask
 from src.analysis.rag_engine import RAGEngine
+
 
 def test_rag_engine_green_project():
     summary = ProjectSummary(
@@ -19,9 +19,9 @@ def test_rag_engine_green_project():
         completed_count=9,
         in_progress_count=1,
         not_started_count=0,
-        on_hold_count=0
+        on_hold_count=0,
     )
-    
+
     # Active task
     task = NormalizedTask(
         task_name="Task 1",
@@ -46,9 +46,9 @@ def test_rag_engine_green_project():
         at_risk=False,
         total_float=10.0,
         status_comment=None,
-        data_completeness=1.0
+        data_completeness=1.0,
     )
-    
+
     # Milestone L1
     milestone = NormalizedTask(
         task_name="Milestone 1",
@@ -73,9 +73,9 @@ def test_rag_engine_green_project():
         at_risk=False,
         total_float=0.0,
         status_comment=None,
-        data_completeness=1.0
+        data_completeness=1.0,
     )
-    
+
     project_data = ProjectData(
         summary=summary,
         tasks=[task, milestone],
@@ -83,16 +83,17 @@ def test_rag_engine_green_project():
         comments=[],
         source_file="test.xlsx",
         schema_type="s2p",
-        data_quality_score=1.0
+        data_quality_score=1.0,
     )
-    
+
     engine = RAGEngine()
     result = engine.compute_rag(project_data)
-    
+
     assert result.overall_rag == RAGStatus.GREEN
     assert result.composite_score >= 70.0
     assert result.override_applied is None
     assert result.data_confidence == 1.0
+
 
 def test_rag_engine_red_override():
     summary = ProjectSummary(
@@ -109,9 +110,9 @@ def test_rag_engine_red_override():
         completed_count=1,
         in_progress_count=9,
         not_started_count=0,
-        on_hold_count=0
+        on_hold_count=0,
     )
-    
+
     # Delayed Milestone L1 -> triggers schedule slip and milestone health failure
     milestone = NormalizedTask(
         task_name="Milestone 1",
@@ -119,7 +120,9 @@ def test_rag_engine_red_override():
         level=1,
         phase="Phase 1",
         planned_start=date(2026, 1, 1),
-        planned_end=date(2026, 3, 31),  # Should be complete long ago (ref_date is June 1)
+        planned_end=date(
+            2026, 3, 31
+        ),  # Should be complete long ago (ref_date is June 1)
         actual_start=date(2026, 1, 1),
         actual_end=None,
         baseline_start=date(2026, 1, 1),
@@ -136,9 +139,9 @@ def test_rag_engine_red_override():
         at_risk=True,
         total_float=0.0,
         status_comment=None,
-        data_completeness=1.0
+        data_completeness=1.0,
     )
-    
+
     project_data = ProjectData(
         summary=summary,
         tasks=[milestone],
@@ -146,11 +149,11 @@ def test_rag_engine_red_override():
         comments=[],
         source_file="test.xlsx",
         schema_type="s2p",
-        data_quality_score=1.0
+        data_quality_score=1.0,
     )
-    
+
     engine = RAGEngine()
     result = engine.compute_rag(project_data)
-    
+
     assert result.overall_rag == RAGStatus.RED
     assert result.override_applied is not None

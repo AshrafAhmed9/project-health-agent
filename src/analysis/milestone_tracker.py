@@ -1,22 +1,22 @@
-from datetime import date
-from src.config import SIGNAL_WEIGHTS, RAGStatus
-from src.ingestion.normalizer import ProjectData, NormalizedTask, TaskStatus
+from src.config import SIGNAL_WEIGHTS
+from src.ingestion.normalizer import ProjectData, TaskStatus
 from src.analysis.schedule_analyzer import SignalResult, score_to_rag
+
 
 def analyze_milestones(project_data: ProjectData) -> SignalResult:
     ref_date = project_data.summary.reference_date
     milestones = project_data.milestones
-    
+
     scored_milestones = []
     milestone_details = []
-    
+
     # Filter out Level 0 (the project wrapper task itself) to avoid double counting
     l1_milestones = [m for m in milestones if m.level == 1]
-    
+
     if not l1_milestones:
         # Fallback to level 0 or any milestones if level 1 is empty
         l1_milestones = milestones
-        
+
     for m in l1_milestones:
         # Check if it should be complete
         if m.planned_end and m.planned_end < ref_date:
@@ -31,19 +31,23 @@ def analyze_milestones(project_data: ProjectData) -> SignalResult:
                 else:
                     m_score = 30
                     m_detail = f"{m.task_name}: Past due and significantly behind ({m.percent_complete*100:.0f}%)"
-            else: # Not Started or On Hold
+            else:  # Not Started or On Hold
                 m_score = 0
                 m_detail = f"{m.task_name}: Past due and not started"
             scored_milestones.append(m_score)
             milestone_details.append(m_detail)
-            
-        elif m.planned_start and m.planned_end and m.planned_start <= ref_date <= m.planned_end:
+
+        elif (
+            m.planned_start
+            and m.planned_end
+            and m.planned_start <= ref_date <= m.planned_end
+        ):
             # Active Milestone
             duration = (m.planned_end - m.planned_start).days
             elapsed = (ref_date - m.planned_start).days
             expected_progress = elapsed / max(duration, 1)
             actual_progress = m.percent_complete
-            
+
             if actual_progress >= expected_progress * 0.9:
                 m_score = 90
                 m_detail = f"{m.task_name}: Active and on track ({actual_progress*100:.0f}% vs expected {expected_progress*100:.0f}%)"
@@ -55,9 +59,9 @@ def analyze_milestones(project_data: ProjectData) -> SignalResult:
                 m_detail = f"{m.task_name}: Active and severely behind ({actual_progress*100:.0f}% vs expected {expected_progress*100:.0f}%)"
             scored_milestones.append(m_score)
             milestone_details.append(m_detail)
-            
+
         # Future milestones are not scored to avoid skewing the average
-        
+
     if not scored_milestones:
         # If no active/past milestones, score as 100 (good health)
         score = 100.0
@@ -68,7 +72,7 @@ def analyze_milestones(project_data: ProjectData) -> SignalResult:
         detail = "; ".join(milestone_details[:4])
         if len(milestone_details) > 4:
             detail += f" (+{len(milestone_details)-4} more)"
-            
+
     return SignalResult(
         name="Milestone Health",
         score=float(score),
@@ -78,6 +82,6 @@ def analyze_milestones(project_data: ProjectData) -> SignalResult:
         metrics={
             "milestone_count": len(l1_milestones),
             "scored_count": len(scored_milestones),
-            "raw_scores": scored_milestones
-        }
+            "raw_scores": scored_milestones,
+        },
     )
