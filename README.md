@@ -9,8 +9,8 @@ An automated pipeline designed for the Zycus AI Engineer Intern Technical Assign
 A launcher script is provided to handle virtual environment creation, package installation, and execution of the complete pipeline.
 
 ```bash
-# Navigate to the assignment folder
-cd "/Users/ashraf/Desktop/projects/zycus assignment"
+# Navigate to the project directory
+cd project-health-agent
 
 # Make launcher executable and run
 chmod +x run.sh && ./run.sh
