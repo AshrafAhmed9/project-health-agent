@@ -1,12 +1,12 @@
-# 🏥 Project Health Reporting Agent
+# Project Health Reporting Agent
 
-An AI-powered system designed for the Zycus AI Engineer Intern Technical Assignment. It automatically parses project plans, determines Red/Amber/Green (RAG) health status using a deterministic multi-signal framework, provides reasoning (with LLM or offline template fallback), and constructs slide decks for executive VPs.
+An automated pipeline designed for the Zycus AI Engineer Intern Technical Assignment. The system parses project plans, determines Red/Amber/Green (RAG) health status using a deterministic multi-signal framework, provides narrative reasoning (with LLM or offline template fallback), and generates executive slide decks.
 
 ---
 
-## 🚀 Quick Start (One-Command Run)
+## Quick Start (One-Command Run)
 
-We provide a launcher script that handles virtual environment creation, package installations, and executes the complete reporting pipeline.
+A launcher script is provided to handle virtual environment creation, package installation, and execution of the complete pipeline.
 
 ```bash
 # Navigate to the assignment folder
@@ -18,13 +18,13 @@ chmod +x run.sh && ./run.sh
 
 ### Manual Execution
 
-If you prefer to run steps individually:
+To run steps individually:
 
 ```bash
 # 1. Activate the environment
 source .venv/bin/activate
 
-# 2. Run the quantitative dashboard
+# 2. Run the quantitative status dashboard
 python -m src.main analyze
 
 # 3. Generate weekly reports
@@ -39,44 +39,44 @@ python -m src.main full-run
 
 ---
 
-## 🎨 Deliverables Mapping
+## Deliverables Mapping
 
 | Deliverable | File Path / Location | Description |
 | :--- | :--- | :--- |
 | **One-page RAG methodology** | [`rag_methodology.md`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/rag_methodology.md) | Defines the mathematical signals, overrides, and assumptions of the status engine. |
-| **Working AI Agent Code** | [`src/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/src) | Complete Python package containing ingestion, scoring, charting, and presentation modules. |
+| **Project Code** | [`src/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/src) | Complete Python package containing ingestion, scoring, charting, and presentation modules. |
 | **Simulated Weekly Outputs** | [`outputs/weekly_reports/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/outputs/weekly_reports) | Reports across 3 historical weeks (`2026-06-18`, `2026-06-25`, `2026-07-02`) showing trajectories. |
-| **Monthly Presentation** | [`outputs/monthly_presentation/executive_deck_july_2026.pptx`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/outputs/monthly_presentation/executive_deck_july_2026.pptx) | A 7-slide, 16:9 widescreen PowerPoint deck with embedded charts ready for VPs. |
-| **Unit Tests** | [`tests/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/tests) | Pytest files covering parser integrity and RAG override rules. |
+| **Monthly Presentation** | [`outputs/monthly_presentation/executive_deck_july_2026.pptx`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/outputs/monthly_presentation/executive_deck_july_2026.pptx) | A 7-slide, 16:9 widescreen PowerPoint deck with embedded charts ready for stakeholders. |
+| **Unit & Integration Tests** | [`tests/`](file:///Users/ashraf/Desktop/projects/zycus%20assignment/tests) | Pytest files covering parser integrity, normalized data mapping, and RAG override rules. |
 
 ---
 
-## 🏗️ Design Decisions (Why This Wins)
+## Technical Design Decisions
 
-1. **Deterministic RAG + LLM Reasoning**: Most candidates use an LLM to guess the RAG status. This is error-prone, slow, and lacks auditability. Our system separates the concerns: a **deterministic engine computes the RAG mathematically** using 6 signals and specific thresholds, while the **LLM is used only to generate the plain-English narrative**. A VP can trace a RED status to a specific formula.
-2. **Offline Resilience**: The system detects if an `OPENAI_API_KEY` is present. If missing, it automatically falls back to a **local template generator** for reports and slides. The entire pipeline executes successfully offline out-of-the-box.
-3. **Multi-Schema Ingestion**: The two project plans (`S2P Project.xlsx` and `Project Plan B.xlsx`) have different column counts (33 vs 37) and different name schemas (e.g., Level vs Ancestors). The ingestion parser automatically detects the header signature and maps the schemas to a unified record structure.
-4. **Data Confidence Rating**: Messy data (like `#UNPARSEABLE` formulas or missing dates) is handled gracefully without crashing, and decreases a computed "Data Confidence" percentage in the report headers to notify leadership.
+1. **Deterministic RAG + LLM Reasoning**: Rather than using an LLM to guess project health (which is non-deterministic and prone to hallucination), this system computes RAG status mathematically using 6 core signals and strict override thresholds. The LLM is used strictly to synthesize these computed metrics and comments into a coherent executive summary.
+2. **Offline-First Resilience**: If no `OPENAI_API_KEY` is present in the environment or `.env` file, the pipeline automatically falls back to a rule-based template engine to draft the weekly reports and slide deck content.
+3. **Schema Auto-Detection**: The ingestion parser (`parser.py`) dynamically detects the schema type based on header signatures, allowing the system to process both `S2P Project.xlsx` (33 columns) and `Project Plan B.xlsx` (37 columns) without manual column mapping adjustments.
+4. **Data Quality Tracking**: The normalizer calculates a data completeness score for every task and project. If critical metadata (like baseline dates) is missing or unparseable, the system reports a data confidence warning.
 
 ---
 
-## 📊 Analytical signals used
+## Analytical Signals and Weights
 
-The status engine calculates a composite score (0-100) using these weighted components:
-- **Schedule Performance (25%)**: SPI calculation ($\text{SPI} = \frac{\% \text{ Complete}}{\text{Timeline Ratio}}$) + variance penalty caps for delay bounds.
+The status engine calculates a composite score (0-100) based on the following weighted components:
+- **Schedule Performance (25%)**: Computed via Schedule Performance Index ($SPI = \frac{\% \text{ Complete}}{\text{Timeline Ratio}}$) with capping penalties for severe variance.
 - **Milestone Health (20%)**: Progress scores for completed and active Level-1 milestones.
-- **Task Velocity (15%)**: Forecast of progress rates relative to project close target.
-- **Blocker Density (15%)**: Density of "On Hold", stalled, or flagged active items.
-- **Resource Coverage (10%)**: Ownership allocation across all active tasks.
-- **Dependency Risk (15%)**: Float levels and critical path delay indicators.
+- **Task Velocity (15%)**: Forecast of progress rates relative to project close targets.
+- **Blocker Density (15%)**: Density of "On Hold", stalled, or flagged active tasks.
+- **Resource Coverage (10%)**: Owner allocation ratio across all active tasks.
+- **Dependency Risk (15%)**: Schedule buffer/float thresholds and critical path delay indicators.
 
 ---
 
-## 🧪 Verification & Tests
+## Automated Tests
 
-To execute the unit tests:
+To execute the unit and integration test suites:
 ```bash
 source .venv/bin/activate
 python -m pytest tests/ -v
 ```
-All tests cover parser integrity, validation of RAG computation, and override rules.
+All tests verify parsing integrity, normalized data formats, and RAG status calculation logic.
